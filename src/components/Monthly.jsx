@@ -5,44 +5,62 @@ import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { monthKeys, monthLabel, getDifficultyInfo, formatPosition } from "../data";
-import { apiUpdateKeyword } from "../services/api";
 
 export default function Monthly({ rows, setRows }) {
   const months = monthKeys(6);
+  const currentMonthKey = months.at(-1);
   const [from, setFrom] = useState(months[0]);
   const [to, setTo] = useState(months.at(-1));
 
-  const pos = (r, m) => r.monthly?.[m];
-  const diff = (r) => (pos(r, from) && pos(r, to) ? pos(r, from) - pos(r, to) : null); // + = improved
+  const pos = (r, m) => {
+    if (r.monthly && r.monthly[m] !== undefined && r.monthly[m] !== null && r.monthly[m] !== "") {
+      return Number(r.monthly[m]);
+    }
+    // Fallback: If it's the current active month, use the latest position from daily trend history
+    if (m === currentMonthKey) {
+      if (r.history && r.history.length > 0) {
+        return Number(r.history[r.history.length - 1]);
+      }
+    }
+    return undefined;
+  };
 
-  const setPos = (id, m, v) => {
-    let updatedMonthlyObj = null;
-    setRows((prevRows) =>
-      prevRows.map((r) => {
+  const diff = (r) => (pos(r, from) !== undefined && pos(r, to) !== undefined ? pos(r, from) - pos(r, to) : null); // + = improved
+
+  const setPos = (id, m, v) =>
+    setRows((prev) =>
+      prev.map((r) => {
         if (r.id !== id) return r;
-        const monthly = { ...r.monthly };
+        const monthly = { ...(r.monthly || {}) };
         const raw = String(v).trim();
+        let newHistory = r.history ? [...r.history] : Array(30).fill(50);
+        let parsedVal = undefined;
+
         if (raw === ">100" || raw === "100+" || raw === "101" || raw === "> 100" || raw === "<100") {
+          parsedVal = 101;
           monthly[m] = 101;
-        } else if (raw === "") {
+        } else if (raw === "" || raw === "-" || raw === "–") {
           delete monthly[m];
         } else {
           const n = Number(raw.replace(/[^0-9]/g, ""));
-          if (n >= 100) monthly[m] = 101;
-          else if (n >= 1) monthly[m] = n;
-          else delete monthly[m];
+          if (n >= 100) {
+            parsedVal = 101;
+            monthly[m] = 101;
+          } else if (n >= 1) {
+            parsedVal = n;
+            monthly[m] = n;
+          } else {
+            delete monthly[m];
+          }
         }
-        updatedMonthlyObj = monthly;
-        return { ...r, monthly };
+
+        if (m === currentMonthKey && parsedVal !== undefined) {
+          newHistory[newHistory.length - 1] = parsedVal;
+        }
+
+        return { ...r, monthly, history: newHistory };
       })
     );
-
-    if (updatedMonthlyObj) {
-      apiUpdateKeyword(id, { monthly: updatedMonthlyObj }).catch((err) => {
-        console.warn("Failed to sync monthly position update:", err);
-      });
-    }
-  };
 
   const diffs = rows.map(diff).filter((d) => d !== null);
   const summary = [
@@ -68,7 +86,10 @@ export default function Monthly({ rows, setRows }) {
         r.group,
         r.volume ? r.volume.toLocaleString("en-IN") : "–",
         `${kd.score}% (${kd.level})`,
-        ...months.map((m) => (pos(r, m) ? formatPosition(pos(r, m)) : "")),
+        ...months.map((m) => {
+          const p = pos(r, m);
+          return p !== undefined && p !== null ? formatPosition(p) : "";
+        }),
         diff(r) ?? "",
       ];
     });
@@ -184,7 +205,14 @@ export default function Monthly({ rows, setRows }) {
                   </td>
                   {months.map((m) => {
                     const p = pos(r, m);
-                    const displayVal = p ? (p > 100 ? ">100" : String(p)) : "";
+                    const displayVal =
+                      p !== undefined && p !== null
+                        ? p > 100
+                          ? ">100"
+                          : p >= 90 && p <= 100
+                          ? "<100"
+                          : String(p)
+                        : "";
                     return (
                       <td key={m} className={m === from || m === to ? "hl" : ""}>
                         <input

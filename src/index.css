@@ -1594,13 +1594,14 @@ tbody tr:last-child td {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(6px);
   z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
+  overflow-y: auto;
   animation: fadeIn 0.2s ease-out;
 }
 
@@ -1609,17 +1610,30 @@ tbody tr:last-child td {
   border: 1px solid var(--line);
   border-radius: 14px;
   width: min(560px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
   padding: 24px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
   display: flex;
   flex-direction: column;
   gap: 16px;
+  position: relative;
+}
+
+.modal-card::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.modal-card::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
 }
 
 .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .modal-title {
@@ -2336,16 +2350,24 @@ tbody tr:last-child td {
    EXCEL IMPORT MODAL STYLES
    ============================================================ */
 
+.excel-import-modal {
+  width: min(920px, 95vw) !important;
+  max-width: 920px !important;
+  max-height: min(90vh, 800px) !important;
+  padding: 22px 24px !important;
+  overflow-y: auto !important;
+}
+
 .excel-sample-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
   background: rgba(16, 185, 129, 0.08);
   border: 1px solid rgba(16, 185, 129, 0.25);
   border-radius: 10px;
-  padding: 12px 14px;
-  margin: 14px 0 16px;
+  padding: 10px 14px;
+  margin: 10px 0 12px;
 }
 
 .excel-sample-text {
@@ -2355,7 +2377,7 @@ tbody tr:last-child td {
 }
 
 .excel-sample-text b {
-  font-size: 0.85rem;
+  font-size: 0.84rem;
   color: #34d399;
 }
 
@@ -2371,9 +2393,9 @@ tbody tr:last-child td {
   background: #10b981;
   color: #064e3b;
   border: none;
-  padding: 8px 14px;
+  padding: 7px 14px;
   border-radius: 7px;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
@@ -2394,7 +2416,7 @@ tbody tr:last-child td {
   border: 1px solid var(--line);
   border-radius: 9px;
   padding: 3px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .excel-tab-btn {
@@ -2420,7 +2442,7 @@ tbody tr:last-child td {
   border: 2px dashed #334155;
   background: rgba(15, 23, 42, 0.4);
   border-radius: 12px;
-  padding: 32px 20px;
+  padding: 24px 20px;
   text-align: center;
   cursor: pointer;
   transition: all 0.18s ease;
@@ -2437,15 +2459,15 @@ tbody tr:last-child td {
 }
 
 .excel-drop-icon {
-  width: 54px;
-  height: 54px;
+  width: 48px;
+  height: 48px;
   border-radius: 12px;
   background: rgba(16, 185, 129, 0.12);
   color: #34d399;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .excel-preview-container {
@@ -2453,7 +2475,21 @@ tbody tr:last-child td {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 12px;
-  margin-top: 12px;
+  margin-top: 10px;
+}
+
+.excel-preview-scroll {
+  max-height: 240px;
+  overflow-x: auto;
+  overflow-y: auto;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.excel-preview-scroll table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
 }
 
 .excel-preview-header {
@@ -2471,6 +2507,16 @@ tbody tr:last-child td {
   background: rgba(16, 185, 129, 0.15);
   padding: 3px 9px;
   border-radius: 999px;
+}
+
+.excel-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 

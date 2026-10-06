@@ -7,8 +7,8 @@ import {
   getDifficultyInfo,
   formatVolume,
   formatPosition,
-  isExpired,
   monthKeys,
+  isExpired,
 } from "./data";
 import Monthly from "./components/Monthly";
 import AddKeywordView from "./components/AddKeywordView";
@@ -403,20 +403,12 @@ export default function App() {
   useEffect(() => {
     async function loadDb() {
       const dbData = await fetchDatabaseData();
-      if (dbData && dbData.projects) {
-        // Merge any local projects from localStorage that were created before DB connected
-        const dbProjectIds = new Set(dbData.projects.map((p) => p.id));
-        const missingLocalProjects = projects.filter((p) => !dbProjectIds.has(p.id));
-
-        const mergedProjects = [...dbData.projects, ...missingLocalProjects];
-        setProjects(mergedProjects);
+      if (dbData && dbData.projects && dbData.projects.length > 0) {
+        setProjects(dbData.projects);
         setCategories(dbData.categories && dbData.categories.length > 0 ? dbData.categories : categories);
         setRows(dbData.keywords && dbData.keywords.length > 0 ? dbData.keywords : rows);
-
-        // If local had new projects or keywords not in DB, sync them to MySQL immediately
-        if (missingLocalProjects.length > 0) {
-          await syncDatabase({ projects: mergedProjects, categories, keywords: rows });
-        }
+      } else if (dbData && projects.length > 0) {
+        await syncDatabase({ projects, categories, keywords: rows });
       }
     }
     loadDb();
@@ -587,12 +579,15 @@ export default function App() {
     const target = rows.find((r) => r.id === id);
     if (!target) return;
     const now = new Date().toISOString();
+    const prevKeywords = [...rows];
 
-    setRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, deletedAt: now, deletedWith: null } : r))
+    const updatedKeywords = rows.map((r) =>
+      r.id === id ? { ...r, deletedAt: now, deletedWith: null } : r
     );
+    setRows(updatedKeywords);
 
     if (openId === id) setOpenId(null);
+    syncDatabase({ projects, categories, keywords: updatedKeywords });
 
     setUndoToast({
       id: `toast-kw-${id}`,
@@ -603,9 +598,8 @@ export default function App() {
         </span>
       ),
       undoAction: () => {
-        setRows((prev) =>
-          prev.map((r) => (r.id === id ? { ...r, deletedAt: null, deletedWith: null } : r))
-        );
+        setRows(prevKeywords);
+        syncDatabase({ projects, categories, keywords: prevKeywords });
       },
     });
   };
@@ -625,41 +619,40 @@ export default function App() {
         const prevKeywordsState = [...rows];
         const prevCategoriesState = [...categories];
 
+        let updatedKeywords;
+        let updatedCategories;
+
         if (moveKeywordsToUncategorized) {
           // Move keywords to "Uncategorized" and keep them active
-          setRows((prev) =>
-            prev.map((k) =>
-              k.projectId === category.projectId && k.group === category.name && !k.deletedAt
-                ? { ...k, group: "Uncategorized" }
-                : k
-            )
+          updatedKeywords = rows.map((k) =>
+            k.projectId === category.projectId && k.group === category.name && !k.deletedAt
+              ? { ...k, group: "Uncategorized" }
+              : k
           );
-          setCategories((prev) =>
-            prev.map((c) =>
-              c.id === category.id ? { ...c, deletedAt: now, deletedWith: null } : c
-            )
+          updatedCategories = categories.map((c) =>
+            c.id === category.id ? { ...c, deletedAt: now, deletedWith: null } : c
           );
         } else {
           // Cascade delete keywords with deletedWith = category.id
-          setCategories((prev) =>
-            prev.map((c) =>
-              c.id === category.id ? { ...c, deletedAt: now, deletedWith: null } : c
-            )
+          updatedCategories = categories.map((c) =>
+            c.id === category.id ? { ...c, deletedAt: now, deletedWith: null } : c
           );
-          setRows((prev) =>
-            prev.map((k) =>
-              k.projectId === category.projectId && k.group === category.name && !k.deletedAt
-                ? { ...k, deletedAt: now, deletedWith: category.id }
-                : k
-            )
+          updatedKeywords = rows.map((k) =>
+            k.projectId === category.projectId && k.group === category.name && !k.deletedAt
+              ? { ...k, deletedAt: now, deletedWith: category.id }
+              : k
           );
         }
+
+        setCategories(updatedCategories);
+        setRows(updatedKeywords);
 
         if (group === category.name) {
           setGroup("All");
         }
 
         setConfirmModal(null);
+        syncDatabase({ projects, categories: updatedCategories, keywords: updatedKeywords });
 
         setUndoToast({
           id: `toast-cat-${category.id}`,
@@ -672,6 +665,7 @@ export default function App() {
           undoAction: () => {
             setCategories(prevCategoriesState);
             setRows(prevKeywordsState);
+            syncDatabase({ projects, categories: prevCategoriesState, keywords: prevKeywordsState });
           },
         });
       },
@@ -703,30 +697,24 @@ export default function App() {
         const prevKeywords = [...rows];
         const prevActiveId = activeProjectId;
 
+        const updatedProjects = projects.map((p) =>
+          p.id === project.id ? { ...p, deletedAt: now, deletedWith: null } : p
+        );
+        const updatedCategories = categories.map((c) =>
+          c.projectId === project.id && !c.deletedAt
+            ? { ...c, deletedAt: now, deletedWith: project.id }
+            : c
+        );
+        const updatedKeywords = rows.map((k) =>
+          k.projectId === project.id && !k.deletedAt
+            ? { ...k, deletedAt: now, deletedWith: project.id }
+            : k
+        );
+
         // Soft delete project
-        setProjects((prev) =>
-          prev.map((p) =>
-            p.id === project.id ? { ...p, deletedAt: now, deletedWith: null } : p
-          )
-        );
-
-        // Cascade to active categories in this project
-        setCategories((prev) =>
-          prev.map((c) =>
-            c.projectId === project.id && !c.deletedAt
-              ? { ...c, deletedAt: now, deletedWith: project.id }
-              : c
-          )
-        );
-
-        // Cascade to active keywords in this project
-        setRows((prev) =>
-          prev.map((k) =>
-            k.projectId === project.id && !k.deletedAt
-              ? { ...k, deletedAt: now, deletedWith: project.id }
-              : k
-          )
-        );
+        setProjects(updatedProjects);
+        setCategories(updatedCategories);
+        setRows(updatedKeywords);
 
         // Switch to next available project
         const remaining = activeProjects.filter((p) => p.id !== project.id);
@@ -735,6 +723,7 @@ export default function App() {
         }
 
         setConfirmModal(null);
+        syncDatabase({ projects: updatedProjects, categories: updatedCategories, keywords: updatedKeywords });
 
         setUndoToast({
           id: `toast-proj-${project.id}`,
@@ -749,6 +738,7 @@ export default function App() {
             setCategories(prevCategories);
             setRows(prevKeywords);
             setActiveProjectId(prevActiveId);
+            syncDatabase({ projects: prevProjects, categories: prevCategories, keywords: prevKeywords });
           },
         });
       },
@@ -777,30 +767,24 @@ export default function App() {
       return;
     }
 
-    const finalName = targetName.trim();
-
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === project.id ? { ...p, name: finalName, deletedAt: null, deletedWith: null } : p
-      )
+    const updatedProjects = projects.map((p) =>
+      p.id === project.id ? { ...p, name: finalName, deletedAt: null, deletedWith: null } : p
+    );
+    const updatedCategories = categories.map((c) =>
+      c.projectId === project.id && c.deletedWith === project.id
+        ? { ...c, deletedAt: null, deletedWith: null }
+        : c
+    );
+    const updatedKeywords = rows.map((k) =>
+      k.projectId === project.id && k.deletedWith === project.id
+        ? { ...k, deletedAt: null, deletedWith: null }
+        : k
     );
 
-    // Restore cascaded categories & keywords where deletedWith === project.id
-    setCategories((prev) =>
-      prev.map((c) =>
-        c.projectId === project.id && c.deletedWith === project.id
-          ? { ...c, deletedAt: null, deletedWith: null }
-          : c
-      )
-    );
-
-    setRows((prev) =>
-      prev.map((k) =>
-        k.projectId === project.id && k.deletedWith === project.id
-          ? { ...k, deletedAt: null, deletedWith: null }
-          : k
-      )
-    );
+    setProjects(updatedProjects);
+    setCategories(updatedCategories);
+    setRows(updatedKeywords);
+    syncDatabase({ projects: updatedProjects, categories: updatedCategories, keywords: updatedKeywords });
 
     setUndoToast({
       id: `toast-res-proj-${project.id}`,
@@ -864,23 +848,20 @@ export default function App() {
 
     const finalName = targetName.trim();
 
-    // Restore category
-    setCategories((prev) =>
-      prev.map((c) =>
-        c.id === category.id
-          ? { ...c, name: finalName, deletedAt: null, deletedWith: null }
-          : c
-      )
+    const updatedCategories = categories.map((c) =>
+      c.id === category.id
+        ? { ...c, name: finalName, deletedAt: null, deletedWith: null }
+        : c
+    );
+    const updatedKeywords = rows.map((k) =>
+      k.deletedWith === category.id
+        ? { ...k, group: finalName, deletedAt: null, deletedWith: null }
+        : k
     );
 
-    // Restore cascaded keywords with deletedWith === category.id
-    setRows((prev) =>
-      prev.map((k) =>
-        k.deletedWith === category.id
-          ? { ...k, group: finalName, deletedAt: null, deletedWith: null }
-          : k
-      )
-    );
+    setCategories(updatedCategories);
+    setRows(updatedKeywords);
+    syncDatabase({ projects, categories: updatedCategories, keywords: updatedKeywords });
 
     setUndoToast({
       id: `toast-res-cat-${category.id}`,
@@ -945,13 +926,13 @@ export default function App() {
 
     const finalGroup = options.moveToUncategorized ? "Uncategorized" : keyword.group;
 
-    setRows((prev) =>
-      prev.map((k) =>
-        k.id === keyword.id
-          ? { ...k, group: finalGroup, deletedAt: null, deletedWith: null }
-          : k
-      )
+    const updatedKeywords = rows.map((k) =>
+      k.id === keyword.id
+        ? { ...k, group: finalGroup, deletedAt: null, deletedWith: null }
+        : k
     );
+    setRows(updatedKeywords);
+    syncDatabase({ projects, categories, keywords: updatedKeywords });
 
     setUndoToast({
       id: `toast-res-kw-${keyword.id}`,
@@ -990,18 +971,38 @@ export default function App() {
       title: "Permanently Delete",
       itemDescription: itemDesc,
       cascadeWarning: cascadeWarn,
-      onConfirm: () => {
+      onConfirm: async () => {
+        let updatedProjects = projects;
+        let updatedCategories = categories;
+        let updatedKeywords = rows;
+
         if (type === "projects") {
-          setProjects((prev) => prev.filter((p) => p.id !== item.id));
-          setCategories((prev) => prev.filter((c) => c.projectId !== item.id));
-          setRows((prev) => prev.filter((k) => k.projectId !== item.id));
+          updatedProjects = projects.filter((p) => p.id !== item.id);
+          updatedCategories = categories.filter((c) => c.projectId !== item.id);
+          updatedKeywords = rows.filter((k) => k.projectId !== item.id);
+          setProjects(updatedProjects);
+          setCategories(updatedCategories);
+          setRows(updatedKeywords);
+          try {
+            await apiDeleteProject(item.id);
+          } catch {}
         } else if (type === "categories") {
-          setCategories((prev) => prev.filter((c) => c.id !== item.id));
-          setRows((prev) => prev.filter((k) => k.deletedWith !== item.id));
+          updatedCategories = categories.filter((c) => c.id !== item.id);
+          updatedKeywords = rows.filter((k) => k.deletedWith !== item.id);
+          setCategories(updatedCategories);
+          setRows(updatedKeywords);
+          try {
+            await apiDeleteCategory(item.id);
+          } catch {}
         } else if (type === "keywords") {
-          setRows((prev) => prev.filter((k) => k.id !== item.id));
+          updatedKeywords = rows.filter((k) => k.id !== item.id);
+          setRows(updatedKeywords);
+          try {
+            await apiDeleteKeyword(item.id);
+          } catch {}
         }
         setConfirmModal(null);
+        syncDatabase({ projects: updatedProjects, categories: updatedCategories, keywords: updatedKeywords });
       },
     });
   };
@@ -1033,18 +1034,38 @@ export default function App() {
       title: "Permanently Delete Selected",
       itemDescription: `${ids.length} selected ${type}`,
       cascadeWarning: "All selected items and their cascaded children will be permanently removed.",
-      onConfirm: () => {
+      onConfirm: async () => {
+        let updatedProjects = projects;
+        let updatedCategories = categories;
+        let updatedKeywords = rows;
+
         if (type === "projects") {
-          setProjects((prev) => prev.filter((p) => !ids.includes(p.id)));
-          setCategories((prev) => prev.filter((c) => !ids.includes(c.projectId)));
-          setRows((prev) => prev.filter((k) => !ids.includes(k.projectId)));
+          updatedProjects = projects.filter((p) => !ids.includes(p.id));
+          updatedCategories = categories.filter((c) => !ids.includes(c.projectId));
+          updatedKeywords = rows.filter((k) => !ids.includes(k.projectId));
+          setProjects(updatedProjects);
+          setCategories(updatedCategories);
+          setRows(updatedKeywords);
+          for (const id of ids) {
+            try { await apiDeleteProject(id); } catch {}
+          }
         } else if (type === "categories") {
-          setCategories((prev) => prev.filter((c) => !ids.includes(c.id)));
-          setRows((prev) => prev.filter((k) => !ids.includes(k.deletedWith)));
+          updatedCategories = categories.filter((c) => !ids.includes(c.id));
+          updatedKeywords = rows.filter((k) => !ids.includes(k.deletedWith));
+          setCategories(updatedCategories);
+          setRows(updatedKeywords);
+          for (const id of ids) {
+            try { await apiDeleteCategory(id); } catch {}
+          }
         } else if (type === "keywords") {
-          setRows((prev) => prev.filter((k) => !ids.includes(k.id)));
+          updatedKeywords = rows.filter((k) => !ids.includes(k.id));
+          setRows(updatedKeywords);
+          for (const id of ids) {
+            try { await apiDeleteKeyword(id); } catch {}
+          }
         }
         setConfirmModal(null);
+        syncDatabase({ projects: updatedProjects, categories: updatedCategories, keywords: updatedKeywords });
       },
     });
   };
@@ -1055,11 +1076,30 @@ export default function App() {
       type: "emptyTrash",
       title: "Empty Entire Trash",
       totalCount: totalTrashCount,
-      onConfirm: () => {
-        setProjects((prev) => prev.filter((p) => !p.deletedAt));
-        setCategories((prev) => prev.filter((c) => !c.deletedAt));
-        setRows((prev) => prev.filter((k) => !k.deletedAt));
+      onConfirm: async () => {
+        const deletedProjs = projects.filter((p) => p.deletedAt);
+        const deletedCats = categories.filter((c) => c.deletedAt);
+        const deletedKws = rows.filter((k) => k.deletedAt);
+
+        const updatedProjects = projects.filter((p) => !p.deletedAt);
+        const updatedCategories = categories.filter((c) => !c.deletedAt);
+        const updatedKeywords = rows.filter((k) => !k.deletedAt);
+
+        setProjects(updatedProjects);
+        setCategories(updatedCategories);
+        setRows(updatedKeywords);
         setConfirmModal(null);
+
+        for (const p of deletedProjs) {
+          try { await apiDeleteProject(p.id); } catch {}
+        }
+        for (const c of deletedCats) {
+          try { await apiDeleteCategory(c.id); } catch {}
+        }
+        for (const k of deletedKws) {
+          try { await apiDeleteKeyword(k.id); } catch {}
+        }
+        syncDatabase({ projects: updatedProjects, categories: updatedCategories, keywords: updatedKeywords });
       },
     });
   };
@@ -1184,7 +1224,7 @@ export default function App() {
       }
     }
 
-    const currentMonthKey = monthKeys(6).at(-1);
+    const curMonthKey = monthKeys(6).at(-1);
     const newRow = {
       id: Date.now(),
       projectId: activeProject.id,
@@ -1194,7 +1234,7 @@ export default function App() {
       volume: vol,
       difficulty: diff,
       history: Array(30).fill(pos),
-      monthly: { [currentMonthKey]: pos },
+      monthly: { [curMonthKey]: pos },
       deletedAt: null,
       deletedWith: null,
     };
@@ -1278,6 +1318,8 @@ export default function App() {
         if (r.id !== editingKeyword.id) return r;
         const newHistory = [...(r.history || Array(30).fill(pos))];
         newHistory[newHistory.length - 1] = pos;
+        const curMonthKey = monthKeys(6).at(-1);
+        const updatedMonthly = { ...(r.monthly || {}), [curMonthKey]: pos };
         return {
           ...r,
           keyword: editingKeyword.keyword.trim(),
@@ -1286,6 +1328,7 @@ export default function App() {
           volume: vol,
           difficulty: diff,
           history: newHistory,
+          monthly: updatedMonthly,
         };
       })
     );
